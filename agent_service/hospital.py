@@ -84,14 +84,14 @@ _BY_CODE: dict[str, type[HospitalError]] = {
 # ------------------------------------------------------------------ helpers
 
 
-def _parse(value: str) -> datetime:
+def parse_time(value: str) -> datetime:
     dt = datetime.fromisoformat(value)
     return dt if dt.tzinfo else dt.replace(tzinfo=IST)  # no zone means hospital time
 
 
 def same_time(a: str, b: str) -> bool:
     """True if two ISO times are the same moment, whatever their format or zone."""
-    return _parse(a) == _parse(b)
+    return parse_time(a) == parse_time(b)
 
 
 def _find_booking(appointments: list[dict], doctor_id: str, start: str) -> dict | None:
@@ -157,7 +157,7 @@ class HospitalClient:
 
     async def now(self) -> datetime:
         """The hospital's clock. The only clock agent code should use."""
-        return _parse((await self._read("/now"))["now"])
+        return parse_time((await self._read("/now"))["now"])
 
     async def doctors(self, specialty: str | None = None) -> list[dict]:
         return (await self._read("/doctors", **({"specialty": specialty} if specialty else {})))["doctors"]
