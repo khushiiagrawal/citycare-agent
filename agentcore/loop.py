@@ -10,7 +10,9 @@ from typing import Any, Sequence
 
 from ._util import maybe_await as _maybe_await
 from ._util import reject_sync_client
+from .budget import Budget
 from .hooks import Confirm, Deny, Hook, Modify
+from .resilience import ModelUnavailable, RetryPolicy, is_retryable
 from .trace import Event, Price, Trace, Tracer, new_trace, preview
 from .types import (
     PendingConfirmation,
@@ -47,6 +49,8 @@ class Agent:
     `price` turns token counts into dollars (`result.cost_usd`); without it cost is 0.
     `tracer` keeps a trace of every model and tool call, grouped by `ctx.key`.
     `name` labels the agent in traces.
+    `retry` retries model calls that fail for temporary reasons (None turns it off). When it
+    gives up it raises ModelUnavailable. `budget` stops a run that spends too much.
     """
 
     def __init__(
@@ -64,6 +68,8 @@ class Agent:
         name: str = "agent",
         price: Price | None = None,
         tracer: Tracer | None = None,
+        retry: RetryPolicy | None = RetryPolicy(),
+        budget: Budget | None = None,
     ) -> None:
         reject_sync_client(client)
         self.client = client
@@ -78,6 +84,8 @@ class Agent:
         self.name = name
         self.price = price
         self.tracer = tracer
+        self.retry = retry
+        self.budget = budget
 
     async def run(self, messages: list[dict], ctx: RunContext | None = None) -> RunResult:
         """Run until the model stops asking for tools. `messages` is not modified;
@@ -105,8 +113,19 @@ class Agent:
         history = list(messages)
         result = RunResult(text="", stop_reason="end_turn")
         writes = 0
+        started = time.perf_counter()
 
         for step in range(1, self.max_turns + 1):
+            if self.budget:
+                over = self.budget.exceeded(
+                    spent_usd=result.cost_usd,
+                    tokens=sum(result.usage.values()) + result.cache_read_tokens + result.cache_write_tokens,
+                    seconds=time.perf_counter() - started,
+                    session_usd=ctx.total_cost_usd,
+                )
+                if over:
+                    result.text, result.stop_reason = over, "budget_exceeded"
+                    return result
             messages = await self._before_model(history, ctx)
             if isinstance(messages, Deny):
                 result.text, result.stop_reason = messages.reason, "blocked"
@@ -186,20 +205,40 @@ class Agent:
         }
         if len(self.tools):
             kwargs["tools"] = self.tools.api_schemas()
-        started_at, clock = time.time(), time.perf_counter()
+        attempts = self.retry.max_attempts if self.retry else 1
+        for attempt in range(1, attempts + 1):
+            started_at, clock = time.time(), time.perf_counter()
+            try:
+                response = await self._create(kwargs)
+            except Exception as e:
+                error = preview(f"{type(e).__name__}: {e}")
+                trace.add(Event("model", self.model, started_at, time.perf_counter() - clock,
+                                {"error": error, "attempt": attempt}))
+                if self.retry is None or not is_retryable(e):
+                    raise
+                if attempt == attempts:
+                    raise ModelUnavailable(attempt, e) from e
+                await self.retry.sleep(self.retry.delay(attempt, e))
+                continue
+            used = self._usage_of(response)
+            trace.add(Event("model", self.model, started_at, time.perf_counter() - clock, {
+                "input_tokens": used.input_tokens, "output_tokens": used.output_tokens,
+                "cache_read_tokens": used.cache_read, "cache_write_tokens": used.cache_write,
+                "cost_usd": used.cost, "stop_reason": response.stop_reason, "attempt": attempt,
+            }))
+            return response, used
+        raise AssertionError("unreachable")  # the loop above always returns or raises
+
+    async def _create(self, kwargs: dict) -> Any:
+        """One attempt at the model call, with the per-attempt timeout."""
+        call = _maybe_await(self.client.messages.create(**kwargs))
+        timeout = self.retry.attempt_timeout_s if self.retry else None
+        if timeout is None:
+            return await call
         try:
-            response = await _maybe_await(self.client.messages.create(**kwargs))
-        except Exception as e:
-            error = preview(f"{type(e).__name__}: {e}")
-            trace.add(Event("model", self.model, started_at, time.perf_counter() - clock, {"error": error}))
-            raise
-        used = self._usage_of(response)
-        trace.add(Event("model", self.model, started_at, time.perf_counter() - clock, {
-            "input_tokens": used.input_tokens, "output_tokens": used.output_tokens,
-            "cache_read_tokens": used.cache_read, "cache_write_tokens": used.cache_write,
-            "cost_usd": used.cost, "stop_reason": response.stop_reason,
-        }))
-        return response, used
+            return await asyncio.wait_for(call, timeout)
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"model call timed out after {timeout}s") from None
 
     @staticmethod
     def _add(history: list[dict], result: RunResult, message: dict) -> None:
