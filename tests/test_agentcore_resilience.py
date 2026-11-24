@@ -101,17 +101,27 @@ def test_jitter_only_adds_a_little():
     assert all(1.0 <= d <= 1.25 for d in delays) and len(delays) > 1
 
 
-def test_retry_after_header_is_respected_up_to_the_cap():
+def test_retry_after_header_is_respected():
     sleeps = Sleeps()
     err = api_error(anthropic.RateLimitError, 429, **{"retry-after": "2"})
     agent, _ = make([err, text("ok")], retry=policy(sleeps, base_delay_s=0.5, max_delay_s=8.0))
     run(agent)
     assert sleeps.delays == [2.0]
-    sleeps2 = Sleeps()
+
+
+def test_a_retry_after_longer_than_we_are_willing_to_wait_fails_fast():
+    # Retrying early would only hit the same 429 again. Better to fail now so the caller can hand over.
+    sleeps = Sleeps()
     err = api_error(anthropic.RateLimitError, 429, **{"retry-after": "120"})
-    agent, _ = make([err, text("ok")], retry=policy(sleeps2, base_delay_s=0.5, max_delay_s=8.0))
-    run(agent)
-    assert sleeps2.delays == [8.0]
+    agent, fake = make([err, text("never")], retry=policy(sleeps, max_delay_s=8.0))
+    with pytest.raises(ModelUnavailable):
+        run(agent)
+    assert sleeps.delays == [] and len(fake.messages.calls) == 1
+
+
+def test_the_wait_never_exceeds_max_delay_even_with_jitter():
+    p = RetryPolicy(base_delay_s=1.0, max_delay_s=1.0, jitter=0.5)
+    assert all(p.delay(1, RuntimeError()) <= 1.0 for _ in range(50))
 
 
 def test_giving_up_raises_model_unavailable_with_the_cause():

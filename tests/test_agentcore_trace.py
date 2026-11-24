@@ -199,3 +199,24 @@ def test_trace_to_dict_is_json_friendly():
     assert {"trace_id", "agent", "stop_reason", "duration_s", "input_tokens", "output_tokens", "cost_usd",
             "events"} <= set(data)
     assert data["events"][0]["kind"] == "model" and "duration_s" in data["events"][0]
+
+
+def test_a_limit_of_zero_keeps_no_traces():
+    tracer = Tracer(max_traces_per_key=0)
+    agent, _ = make([text("1")], tracer=tracer)
+    run(agent, RunContext(key="a"))
+    assert tracer.traces("a") == []
+
+
+def test_tool_input_in_the_trace_is_a_copy_and_is_bounded():
+    original = {"x": 1, "pad": "y" * 5000}
+    tracer = Tracer()
+    agent, _ = make([tool_use("t", original), text("ok")], [tool()], tracer=tracer)
+    run(agent, RunContext(key="a"))
+    event = next(e for e in tracer.traces("a")[0].events if e.kind == "tool")
+    assert isinstance(event.data["input"], str) and len(event.data["input"]) <= 2001  # too big: shortened
+    small = {"x": 1}
+    agent, _ = make([tool_use("t", small), text("ok")], [tool()], tracer=tracer)
+    run(agent, RunContext(key="b"))
+    stored = next(e for e in tracer.traces("b")[0].events if e.kind == "tool").data["input"]
+    assert stored == {"x": 1} and stored is not small

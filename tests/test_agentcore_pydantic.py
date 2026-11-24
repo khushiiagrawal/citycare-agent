@@ -215,3 +215,25 @@ def test_a_handler_error_is_still_an_error_result():
     fake = FakeClaude([tool_use("boom", {"count": 1}), text("ok")])
     run(Agent(client=fake, model="m", system="s", tools=reg))
     assert "kaput" in sent_block(fake)["content"]
+
+
+def test_ctx_is_only_passed_when_the_function_asks_for_it():
+    def with_option(args, top_k=5):
+        return top_k
+
+    def with_named_ctx(args, ctx=None):
+        return ctx
+
+    def with_required_second(args, context):
+        return context
+
+    def only_args(args):
+        return "solo"
+
+    def build(fn):
+        return Tool.from_function(fn, Args, name="t", description="d").handler
+
+    assert build(with_option)("A", "CTX") == 5  # an option, not the context
+    assert build(with_named_ctx)("A", "CTX") == "CTX"
+    assert build(with_required_second)("A", "CTX") == "CTX"
+    assert build(only_args)("A", "CTX") == "solo"

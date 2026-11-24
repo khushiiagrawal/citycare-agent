@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+import json
 import time
 import uuid
 from collections import OrderedDict
@@ -33,6 +35,15 @@ class Price:
             + cache_write * write
         )
         return total / 1_000_000
+
+
+def snapshot(value: Any, limit: int = 2000) -> Any:
+    """A copy of `value` that is safe to keep: small things are deep-copied, big ones are shortened to text."""
+    try:
+        text = json.dumps(value, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return preview(value, limit)
+    return copy.deepcopy(value) if len(text) <= limit else preview(text, limit)
 
 
 def preview(value: Any, limit: int = _PREVIEW_CHARS) -> str:
@@ -111,7 +122,7 @@ class Tracer:
         traces = self._by_key.setdefault(key, [])
         self._by_key.move_to_end(key)
         traces.append(trace)
-        del traces[: -self.max_traces_per_key]
+        del traces[: max(0, len(traces) - self.max_traces_per_key)]
         while len(self._by_key) > self.max_keys:
             self._by_key.popitem(last=False)
         return trace

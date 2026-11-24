@@ -53,7 +53,8 @@ class RetryPolicy:
 
     `max_attempts` counts the first try. Waits double each time from `base_delay_s` up to
     `max_delay_s`, plus up to `jitter` (a fraction) extra so many clients do not retry in
-    step. A `retry-after` header is respected, capped at `max_delay_s`.
+    step, never beyond `max_delay_s`. A `retry-after` header is respected; if it asks for more
+    than `max_delay_s` we give up at once instead of retrying too early.
     `attempt_timeout_s` limits one attempt; a hung call counts as a retryable failure.
 
     Build the client with `make_async_client()` so the SDK's own retries are off. Otherwise
@@ -70,9 +71,14 @@ class RetryPolicy:
         if self.max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
 
+    def too_long(self, error: BaseException) -> bool:
+        """True if the server asked us to wait longer than `max_delay_s`."""
+        hinted = _retry_after(error)
+        return hinted is not None and hinted > self.max_delay_s
+
     def delay(self, attempt: int, error: BaseException) -> float:
-        wait = min(self.base_delay_s * 2 ** (attempt - 1), self.max_delay_s)
+        wait = self.base_delay_s * 2 ** (attempt - 1)
         hinted = _retry_after(error)
         if hinted is not None:
-            wait = max(wait, min(hinted, self.max_delay_s))
-        return wait * (1 + random.random() * self.jitter)
+            wait = max(wait, hinted)
+        return min(wait * (1 + random.random() * self.jitter), self.max_delay_s)

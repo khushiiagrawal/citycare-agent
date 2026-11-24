@@ -67,7 +67,7 @@ class Tool:
     input_model: type[BaseModel] | None = None
 
     def __post_init__(self) -> None:
-        if not _NAME_RE.match(self.name):
+        if not _NAME_RE.fullmatch(self.name):
             raise ValueError(f"Invalid tool name: {self.name!r} (use 1-64 chars of a-z, A-Z, 0-9, _ or -)")
 
     @classmethod
@@ -92,7 +92,12 @@ class Tool:
             p for p in inspect.signature(fn).parameters.values()
             if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
         ]
-        handler = fn if len(positional) >= 2 else (lambda args, ctx: fn(args))
+        # The second parameter is the run context only if it is required or called ctx/context.
+        # An optional parameter with another name (top_k=5) is the function's own option.
+        wants_ctx = len(positional) >= 2 and (
+            positional[1].default is positional[1].empty or positional[1].name in ("ctx", "context")
+        )
+        handler = fn if wants_ctx else (lambda args, ctx: fn(args))
         return cls(
             name=name or fn.__name__,
             description=description,

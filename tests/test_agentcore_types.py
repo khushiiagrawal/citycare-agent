@@ -22,7 +22,7 @@ def test_tool_writes_defaults_to_false():
     assert _tool(writes=True).writes is True
 
 
-@pytest.mark.parametrize("bad", ["", "has space", "x" * 65, "naïve"])
+@pytest.mark.parametrize("bad", ["", "has space", "x" * 65, "naïve", "book\n"])
 def test_tool_rejects_bad_names(bad):
     with pytest.raises(ValueError):
         _tool(name=bad)

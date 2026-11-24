@@ -13,7 +13,7 @@ from ._util import reject_sync_client
 from .budget import Budget
 from .hooks import Confirm, Deny, Hook, Modify
 from .resilience import ModelUnavailable, RetryPolicy, is_retryable
-from .trace import Event, Price, Trace, Tracer, new_trace, preview
+from .trace import Event, Price, Trace, Tracer, new_trace, preview, snapshot
 from .types import (
     PendingConfirmation,
     Registry,
@@ -217,7 +217,9 @@ class Agent:
                                 {"error": error, "attempt": attempt}))
                 if self.retry is None or not is_retryable(e):
                     raise
-                if attempt == attempts:
+                if attempt == attempts or self.retry.too_long(e):
+                    # Out of attempts, or the server asked for a wait longer than we will do:
+                    # retrying early would just hit the same limit. Fail so the caller can hand over.
                     raise ModelUnavailable(attempt, e) from e
                 await self.retry.sleep(self.retry.delay(attempt, e))
                 continue
@@ -351,7 +353,7 @@ class Agent:
             blocks.append({"type": "tool_result", "tool_use_id": call.id, "content": content, "is_error": res.is_error})
             started_at, seconds = timing.get(call.id, (time.time(), 0.0))
             trace.add(Event("tool", call.name, started_at, seconds, {
-                "input": ran.input, "outcome": kind, "is_error": res.is_error, "output": preview(content),
+                "input": snapshot(ran.input), "outcome": kind, "is_error": res.is_error, "output": preview(content),
             }))
         self._add(history, result, {"role": "user", "content": blocks})
         return writes, asked
