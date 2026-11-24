@@ -23,6 +23,7 @@ from .types import (
     ToolInputError,
     ToolRecord,
     ToolResult,
+    fingerprint,
 )
 
 
@@ -270,6 +271,20 @@ class Agent:
                 outcomes[call.id] = (ToolResult(str(e), True), "error")
                 continue
 
+            if tool.writes and self.max_writes_per_run is not None and writes >= self.max_writes_per_run:
+                # Checked before the hooks so a confirmation is not used up by a call that cannot run.
+                # The user did say yes, so keep it alive for their next message.
+                for i, p in enumerate(ctx.pending):
+                    if p.fingerprint == fingerprint(call.name, call.input):
+                        ctx.pending[i] = replace(p, turn=ctx.turn)
+                limit = "one change" if self.max_writes_per_run == 1 else f"{self.max_writes_per_run} changes"
+                outcomes[call.id] = (
+                    ToolResult(f"Not executed: only {limit} can be made per message. "
+                               "Tell the user and continue in their next message.", True),
+                    "denied",
+                )
+                continue
+
             verdict = None
             for hook in self.hooks:
                 outcome = await _maybe_await(hook.before_tool(call, ctx))
@@ -303,15 +318,7 @@ class Agent:
             if verdict is not None:  # a failed Modify
                 outcomes[call.id] = verdict
                 continue
-            if tool.writes and self.max_writes_per_run is not None:
-                if writes >= self.max_writes_per_run:
-                    limit = "one change" if self.max_writes_per_run == 1 else f"{self.max_writes_per_run} changes"
-                    outcomes[call.id] = (
-                        ToolResult(f"Not executed: only {limit} can be made per message. "
-                                   "Tell the user and continue in their next message.", True),
-                        "denied",
-                    )
-                    continue
+            if tool.writes:
                 writes += 1
             to_run.append(call)
 

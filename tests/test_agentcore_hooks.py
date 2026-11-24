@@ -328,3 +328,26 @@ def test_gate_prompt_is_built_from_the_actual_call():
     gate = ConfirmGate({"w": lambda call, ctx: f"Book slot {call.input['x']}?"})
     agent, _ = make_agent([tool_use("w", {"x": 5})], [make_tool("w")], [gate])
     assert run(agent).text == "Book slot 5?"
+
+
+def test_a_write_refused_by_the_cap_keeps_its_confirmation_for_the_next_message():
+    from agentcore.session import InMemoryStore, run_in_session
+
+    calls = []
+    tools = [make_tool("w1", calls, writes=True), make_tool("w2", calls, writes=True)]
+    both = tool_uses([("w1", {"x": 1}), ("w2", {"x": 2})])
+    script = [both, both, text("first one done"), tool_use("w2", {"x": 2}), text("second one done")]
+    gate = gate_for("w1", "w2")
+    agent, _ = make_agent(script, tools, [gate], max_writes_per_run=1)
+
+    async def go():
+        store = InMemoryStore()
+        asked = await run_in_session(agent, store, "k", "book both")
+        yes = await run_in_session(agent, store, "k", "yes to both")
+        later = await run_in_session(agent, store, "k", "ok go on")
+        return asked, yes, later
+
+    asked, yes, later = asyncio.run(go())
+    assert asked.stop_reason == "paused"
+    assert calls == [("w1", {"x": 1}), ("w2", {"x": 2})]  # w2 ran on the next message without asking again
+    assert yes.tool_records[1].outcome == "denied" and later.text == "second one done"
