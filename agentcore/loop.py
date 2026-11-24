@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import Any, Sequence
 
 from ._util import maybe_await as _maybe_await
+from ._util import reject_sync_client
 from .hooks import Confirm, Deny, Hook, Modify
 from .types import (
     PendingConfirmation,
@@ -28,8 +29,8 @@ def _content_text(content: Any) -> str:
 class Agent:
     """One model + one system prompt + one set of tools.
 
-    `client` is anything with `messages.create(...)`: `anthropic.AsyncAnthropic`,
-    `anthropic.Anthropic`, or a test fake. The result may be awaitable or not.
+    `client` is `anthropic.AsyncAnthropic`, or a test fake with `messages.create(...)`
+    (the fake's result may be awaitable or not). Sync Anthropic clients are rejected.
     `max_writes_per_run` caps calls to tools marked `writes=True` across the whole run.
     `hooks` run around the model and its tools (see hooks.py).
     """
@@ -47,6 +48,7 @@ class Agent:
         request_params: dict | None = None,
         hooks: Sequence[Hook] = (),
     ) -> None:
+        reject_sync_client(client)
         self.client = client
         self.model = model
         self.system = system
@@ -77,10 +79,19 @@ class Agent:
         writes = 0
 
         for step in range(1, self.max_turns + 1):
-            response = await self._call_model(history, ctx)
+            messages = await self._before_model(history, ctx)
+            if isinstance(messages, Deny):
+                result.text, result.stop_reason = messages.reason, "blocked"
+                return result
+            response = await self._call_model(messages)
             result.model_calls += 1
+            # Cost is counted from what the model really returned, before any hook rewrites it.
             result.usage["input_tokens"] += getattr(response.usage, "input_tokens", 0) or 0
             result.usage["output_tokens"] += getattr(response.usage, "output_tokens", 0) or 0
+            for hook in self.hooks:
+                replaced = await _maybe_await(hook.after_model(response, ctx))
+                if replaced is not None:
+                    response = replaced
 
             blocks = [b.model_dump(exclude_none=True) for b in response.content]
             result.text = "\n".join(b["text"] for b in blocks if b["type"] == "text").strip()
@@ -109,12 +120,18 @@ class Agent:
 
     # ------------------------------------------------------------------ internals
 
-    async def _call_model(self, history: list[dict], ctx: RunContext) -> Any:
+    async def _before_model(self, history: list[dict], ctx: RunContext) -> list[dict] | Deny:
+        """Run before_model hooks. Returns the messages to send, or a Deny to stop the run."""
         messages = history
         for hook in self.hooks:
-            replaced = await _maybe_await(hook.before_model(messages, ctx))
-            if replaced is not None:
-                messages = replaced
+            outcome = await _maybe_await(hook.before_model(messages, ctx))
+            if isinstance(outcome, Deny):
+                return outcome
+            if isinstance(outcome, list):
+                messages = outcome
+        return messages
+
+    async def _call_model(self, messages: list[dict]) -> Any:
         kwargs: dict = {
             "model": self.model,
             "max_tokens": self.max_tokens,
