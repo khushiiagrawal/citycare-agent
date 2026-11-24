@@ -32,7 +32,8 @@ class Block(Hook):
 def test_before_model_deny_stops_the_run_without_calling_the_model():
     agent, fake = make([text("never")], [Block()])
     res = run(agent)
-    assert res.stop_reason == "blocked" and res.text == "budget used up"
+    assert res.stop_reason == "blocked" and res.reason == "budget used up"
+    assert res.text == ""  # internal reasons are never in the user-facing text
     assert res.model_calls == 0 and res.messages == []
     assert len(fake.messages.calls) == 0
 

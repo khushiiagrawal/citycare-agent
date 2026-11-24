@@ -217,7 +217,7 @@ def test_cost_ceiling_stops_the_run_before_the_next_model_call():
     agent, fake = looping(script, Budget(max_cost_usd=0.003), price=Price(2.0, 10.0))
     res = run(agent)
     assert res.stop_reason == "budget_exceeded" and res.model_calls == 2
-    assert "cost" in res.text.lower()
+    assert "cost" in res.reason.lower() and res.text == ""
     assert res.messages[-1]["role"] == "user"  # history is still valid: every tool call has its result
     assert len(fake.messages.script) == 3
 
@@ -226,7 +226,7 @@ def test_token_ceiling():
     script = [tool_use("t", {}, input_tokens=600, output_tokens=0) for _ in range(5)]
     agent, _ = looping(script, Budget(max_tokens=1000))
     res = run(agent)
-    assert res.stop_reason == "budget_exceeded" and res.model_calls == 2 and "token" in res.text.lower()
+    assert res.stop_reason == "budget_exceeded" and res.model_calls == 2 and "token" in res.reason.lower()
 
 
 def test_time_ceiling_counts_slow_tools():
@@ -236,7 +236,7 @@ def test_time_ceiling_counts_slow_tools():
 
     agent, _ = looping([tool_use("t", {}), text("never")], Budget(max_seconds=0.05), tools=[echo_tool(slow)])
     res = run(agent)
-    assert res.stop_reason == "budget_exceeded" and res.model_calls == 1 and "second" in res.text.lower()
+    assert res.stop_reason == "budget_exceeded" and res.model_calls == 1 and "second" in res.reason.lower()
 
 
 def test_session_ceiling_uses_everything_spent_in_earlier_runs():

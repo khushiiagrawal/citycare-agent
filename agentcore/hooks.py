@@ -7,10 +7,13 @@ Five hook points, all optional, all sync or async:
   after_model(response, ctx)       -> a replacement response, or None (see `with_text`)
   before_tool(call, ctx)           -> Allow | Deny | Modify | Confirm, or None (= Allow)
   after_tool(call, result, ctx)    -> a replacement ToolResult, or None
-  on_finish(result, ctx)           -> nothing; called once when a run ends
+  on_finish(result, ctx)           -> nothing; called once when a run ends normally (also when
+                                      paused, blocked or over budget). Not called if the run raises:
+                                      the trace records that as stop_reason "error"
 
 A blocked model call ends the run with stop_reason "blocked" and the reason in
-`result.text`; the model is not called and nothing is added to the history.
+`result.reason` (internal, for logs; `result.text` stays empty so it cannot reach a user by
+accident). The model is not called and nothing is added to the history.
 A replaced model response is treated exactly as if the model had said it: its text is
 stored in the history, and any tool calls in it still go through the before_tool hooks.
 The cost of the original response is still counted.

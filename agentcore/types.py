@@ -242,6 +242,7 @@ class RunResult:
     usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0})
     pending: list[PendingConfirmation] = field(default_factory=list)
     model_calls: int = 0
+    reason: str = ""  # why a run was "blocked" or "budget_exceeded". Internal: for logs, not for the user
     cost_usd: float = 0.0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0

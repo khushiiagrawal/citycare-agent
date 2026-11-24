@@ -351,3 +351,18 @@ def test_a_write_refused_by_the_cap_keeps_its_confirmation_for_the_next_message(
     assert asked.stop_reason == "paused"
     assert calls == [("w1", {"x": 1}), ("w2", {"x": 2})]  # w2 ran on the next message without asking again
     assert yes.tool_records[1].outcome == "denied" and later.text == "second one done"
+
+
+def test_on_finish_is_not_called_when_the_run_raises():
+    finished = []
+
+    class Watch(Hook):
+        def on_finish(self, result, ctx):
+            finished.append(result.stop_reason)
+
+    agent, _ = make_agent([ConnectionError("down")], [], [Watch()], retry=None)
+    try:
+        run(agent)
+    except ConnectionError:
+        pass
+    assert finished == []  # the trace records a crashed run as stop_reason "error"

@@ -10,7 +10,7 @@ class Budget:
     """Ceilings checked before every model call. Any left as None is not enforced.
 
     A run that hits one stops with stop_reason "budget_exceeded" and the reason in
-    `result.text`. History stays valid. Because the check is before a call, the call that
+    `result.reason` (internal: it shows spend figures, so do not send it to a user). History stays valid. Because the check is before a call, the call that
     crosses the line still happens; `max_tokens` on the agent bounds how far over it can go."""
 
     max_cost_usd: float | None = None  # this run

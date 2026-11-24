@@ -125,11 +125,11 @@ class Agent:
                     session_usd=ctx.total_cost_usd,
                 )
                 if over:
-                    result.text, result.stop_reason = over, "budget_exceeded"
+                    result.reason, result.stop_reason = over, "budget_exceeded"
                     return result
             messages = await self._before_model(history, ctx)
             if isinstance(messages, Deny):
-                result.text, result.stop_reason = messages.reason, "blocked"
+                result.reason, result.stop_reason = messages.reason, "blocked"
                 return result
             response, used = await self._call_model(messages, trace)
             result.model_calls += 1
