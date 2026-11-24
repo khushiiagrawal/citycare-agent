@@ -152,12 +152,22 @@ async def run_in_session(
 
     Takes the conversation's lock, so two messages in the same chat never run at once (and
     two bookings cannot race), loads and tidies the history, runs the agent, and saves the
-    result. If the run raises, nothing is saved and the conversation is left as it was."""
+    result. If the run raises, nothing is saved and the turn counter and pending confirmations
+    are put back (money already spent stays counted). If the run ends without any model reply,
+    for example a before_model hook blocked the message, the message is not added to history."""
     async with store.lock(key, lock_timeout):
         session = await store.load(key)
         history = trim_history(repair_history(session.messages), max_history)
         messages = [*history, {"role": "user", "content": user_message}]
-        result = await agent.run(messages, session.ctx)
-        session.messages = trim_history([*messages, *result.messages], max_history)
+        turn, pending = session.ctx.turn, list(session.ctx.pending)
+        try:
+            result = await agent.run(messages, session.ctx)
+        except BaseException:
+            # The run already moved the turn counter and dropped stale confirmations. Undo that,
+            # so a user who is asked to confirm and hits an outage can simply say "yes" again.
+            session.ctx.turn, session.ctx.pending[:] = turn, pending
+            raise
+        if result.messages:  # a run stopped before any model reply (blocked, over budget) leaves history alone
+            session.messages = trim_history([*messages, *result.messages], max_history)
         await store.save(session)
         return result
