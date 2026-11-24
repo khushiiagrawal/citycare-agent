@@ -216,9 +216,12 @@ class RunContext:
     the loop. `pending` holds confirmations waiting for the user's next message.
     """
 
+    key: str = ""  # which conversation this is; traces are grouped by it
     state: dict = field(default_factory=dict)
     turn: int = 0
     pending: list[PendingConfirmation] = field(default_factory=list)
+    total_cost_usd: float = 0.0  # across every run in this conversation
+    total_tokens: int = 0
 
 
 @dataclass
@@ -239,3 +242,7 @@ class RunResult:
     usage: dict = field(default_factory=lambda: {"input_tokens": 0, "output_tokens": 0})
     pending: list[PendingConfirmation] = field(default_factory=list)
     model_calls: int = 0
+    cost_usd: float = 0.0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    trace_id: str = ""

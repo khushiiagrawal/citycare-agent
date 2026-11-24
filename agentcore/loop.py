@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import replace
+import time
+from dataclasses import dataclass, replace
 from typing import Any, Sequence
 
 from ._util import maybe_await as _maybe_await
 from ._util import reject_sync_client
 from .hooks import Confirm, Deny, Hook, Modify
+from .trace import Event, Price, Trace, Tracer, new_trace, preview
 from .types import (
     PendingConfirmation,
     Registry,
@@ -26,6 +28,15 @@ def _content_text(content: Any) -> str:
     return content if isinstance(content, str) else json.dumps(content, default=str, ensure_ascii=False)
 
 
+@dataclass
+class _Usage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
+    cost: float = 0.0
+
+
 class Agent:
     """One model + one system prompt + one set of tools.
 
@@ -33,6 +44,9 @@ class Agent:
     (the fake's result may be awaitable or not). Sync Anthropic clients are rejected.
     `max_writes_per_run` caps calls to tools marked `writes=True` across the whole run.
     `hooks` run around the model and its tools (see hooks.py).
+    `price` turns token counts into dollars (`result.cost_usd`); without it cost is 0.
+    `tracer` keeps a trace of every model and tool call, grouped by `ctx.key`.
+    `name` labels the agent in traces.
     """
 
     def __init__(
@@ -47,6 +61,9 @@ class Agent:
         max_writes_per_run: int | None = None,
         request_params: dict | None = None,
         hooks: Sequence[Hook] = (),
+        name: str = "agent",
+        price: Price | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
         reject_sync_client(client)
         self.client = client
@@ -58,6 +75,9 @@ class Agent:
         self.max_writes_per_run = max_writes_per_run
         self.request_params = dict(request_params or {})
         self.hooks = list(hooks)
+        self.name = name
+        self.price = price
+        self.tracer = tracer
 
     async def run(self, messages: list[dict], ctx: RunContext | None = None) -> RunResult:
         """Run until the model stops asking for tools. `messages` is not modified;
@@ -66,14 +86,22 @@ class Agent:
         ctx.turn += 1
         # A confirmation only stays valid for the user's very next message.
         ctx.pending[:] = [p for p in ctx.pending if p.turn == ctx.turn - 1]
-        result = await self._run(messages, ctx)
+        trace = self.tracer.start(ctx.key, self.name) if self.tracer else new_trace(ctx.key, self.name)
+        started = time.perf_counter()
+        try:
+            result = await self._run(messages, ctx, trace)
+        except BaseException:
+            trace.stop_reason, trace.duration_s = "error", time.perf_counter() - started
+            raise
+        trace.stop_reason, trace.duration_s = result.stop_reason, time.perf_counter() - started
+        result.trace_id = trace.trace_id
         # Whatever was not asked in this run is no longer waiting for an answer.
         ctx.pending[:] = [p for p in ctx.pending if p.turn == ctx.turn]
         for hook in self.hooks:
             await _maybe_await(hook.on_finish(result, ctx))
         return result
 
-    async def _run(self, messages: list[dict], ctx: RunContext) -> RunResult:
+    async def _run(self, messages: list[dict], ctx: RunContext, trace: Trace) -> RunResult:
         history = list(messages)
         result = RunResult(text="", stop_reason="end_turn")
         writes = 0
@@ -83,11 +111,16 @@ class Agent:
             if isinstance(messages, Deny):
                 result.text, result.stop_reason = messages.reason, "blocked"
                 return result
-            response = await self._call_model(messages)
+            response, used = await self._call_model(messages, trace)
             result.model_calls += 1
             # Cost is counted from what the model really returned, before any hook rewrites it.
-            result.usage["input_tokens"] += getattr(response.usage, "input_tokens", 0) or 0
-            result.usage["output_tokens"] += getattr(response.usage, "output_tokens", 0) or 0
+            result.usage["input_tokens"] += used.input_tokens
+            result.usage["output_tokens"] += used.output_tokens
+            result.cache_read_tokens += used.cache_read
+            result.cache_write_tokens += used.cache_write
+            result.cost_usd += used.cost
+            ctx.total_cost_usd += used.cost
+            ctx.total_tokens += used.input_tokens + used.output_tokens + used.cache_read + used.cache_write
             for hook in self.hooks:
                 replaced = await _maybe_await(hook.after_model(response, ctx))
                 if replaced is not None:
@@ -106,7 +139,7 @@ class Agent:
                 return result
 
             self._add(history, result, {"role": "assistant", "content": blocks})
-            writes, asked = await self._run_tools(calls, ctx, result, history, writes)
+            writes, asked = await self._run_tools(calls, ctx, result, history, writes, trace)
             if asked:
                 # Paused for the user's confirmation. The question is written by code.
                 question = "\n\n".join(dict.fromkeys(p.prompt for p in asked))
@@ -131,7 +164,19 @@ class Agent:
                 messages = outcome
         return messages
 
-    async def _call_model(self, messages: list[dict]) -> Any:
+    def _usage_of(self, response: Any) -> _Usage:
+        usage = response.usage
+        used = _Usage(
+            input_tokens=getattr(usage, "input_tokens", 0) or 0,
+            output_tokens=getattr(usage, "output_tokens", 0) or 0,
+            cache_read=getattr(usage, "cache_read_input_tokens", 0) or 0,
+            cache_write=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+        )
+        if self.price:
+            used.cost = self.price.cost(used.input_tokens, used.output_tokens, used.cache_read, used.cache_write)
+        return used
+
+    async def _call_model(self, messages: list[dict], trace: Trace) -> tuple[Any, _Usage]:
         kwargs: dict = {
             "model": self.model,
             "max_tokens": self.max_tokens,
@@ -141,7 +186,20 @@ class Agent:
         }
         if len(self.tools):
             kwargs["tools"] = self.tools.api_schemas()
-        return await _maybe_await(self.client.messages.create(**kwargs))
+        started_at, clock = time.time(), time.perf_counter()
+        try:
+            response = await _maybe_await(self.client.messages.create(**kwargs))
+        except Exception as e:
+            error = preview(f"{type(e).__name__}: {e}")
+            trace.add(Event("model", self.model, started_at, time.perf_counter() - clock, {"error": error}))
+            raise
+        used = self._usage_of(response)
+        trace.add(Event("model", self.model, started_at, time.perf_counter() - clock, {
+            "input_tokens": used.input_tokens, "output_tokens": used.output_tokens,
+            "cache_read_tokens": used.cache_read, "cache_write_tokens": used.cache_write,
+            "cost_usd": used.cost, "stop_reason": response.stop_reason,
+        }))
+        return response, used
 
     @staticmethod
     def _add(history: list[dict], result: RunResult, message: dict) -> None:
@@ -149,7 +207,8 @@ class Agent:
         result.messages.append(message)
 
     async def _run_tools(
-        self, calls: list[ToolCall], ctx: RunContext, result: RunResult, history: list[dict], writes: int
+        self, calls: list[ToolCall], ctx: RunContext, result: RunResult, history: list[dict], writes: int,
+        trace: Trace,
     ) -> tuple[int, list[PendingConfirmation]]:
         """Run one response's tool calls and append a single user message with all results.
 
@@ -217,12 +276,17 @@ class Agent:
                 writes += 1
             to_run.append(call)
 
+        timing: dict[str, tuple[float, float]] = {}  # call id -> (unix start, seconds)
+
         async def execute(call: ToolCall) -> tuple[ToolResult, str]:
+            started_at, clock = time.time(), time.perf_counter()
             try:
                 value = await _maybe_await(self.tools.get(call.name).handler(parsed[call.id], ctx))
                 return ToolResult(value), "ok"
             except Exception as e:  # a failing tool must not kill the run
                 return ToolResult(f"{type(e).__name__}: {e}", True), "error"
+            finally:
+                timing[call.id] = (started_at, time.perf_counter() - clock)
 
         for call, (res, kind) in zip(to_run, await asyncio.gather(*(execute(c) for c in to_run))):
             for hook in self.hooks:
@@ -235,12 +299,13 @@ class Agent:
         blocks = []
         for call in calls:
             res, kind = outcomes[call.id]
-            result.tool_records.append(ToolRecord(executed.get(call.id, call), res, kind))
-            blocks.append({
-                "type": "tool_result",
-                "tool_use_id": call.id,
-                "content": _content_text(res.content),
-                "is_error": res.is_error,
-            })
+            ran = executed.get(call.id, call)
+            content = _content_text(res.content)
+            result.tool_records.append(ToolRecord(ran, res, kind))
+            blocks.append({"type": "tool_result", "tool_use_id": call.id, "content": content, "is_error": res.is_error})
+            started_at, seconds = timing.get(call.id, (time.time(), 0.0))
+            trace.add(Event("tool", call.name, started_at, seconds, {
+                "input": ran.input, "outcome": kind, "is_error": res.is_error, "output": preview(content),
+            }))
         self._add(history, result, {"role": "user", "content": blocks})
         return writes, asked
