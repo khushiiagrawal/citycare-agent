@@ -9,19 +9,20 @@ from typing import Any, Sequence
 
 from ._util import maybe_await as _maybe_await
 from .hooks import Confirm, Deny, Hook, Modify
-from .types import PendingConfirmation, Registry, RunContext, RunResult, ToolCall, ToolRecord, ToolResult
+from .types import (
+    PendingConfirmation,
+    Registry,
+    RunContext,
+    RunResult,
+    ToolCall,
+    ToolInputError,
+    ToolRecord,
+    ToolResult,
+)
 
 
 def _content_text(content: Any) -> str:
     return content if isinstance(content, str) else json.dumps(content, default=str, ensure_ascii=False)
-
-
-def _check_input(schema: dict, tool_input: Any) -> str | None:
-    """Cheap guard so a malformed call never reaches a handler. Not a full JSON-schema check."""
-    if not isinstance(tool_input, dict):
-        return "Tool input must be a JSON object."
-    missing = [k for k in schema.get("required", []) if k not in tool_input]
-    return f"Missing required field(s): {', '.join(missing)}." if missing else None
 
 
 class Agent:
@@ -139,6 +140,7 @@ class Agent:
         Returns the updated write count and any confirmations that were asked for."""
         outcomes: dict[str, tuple[ToolResult, str]] = {}
         executed: dict[str, ToolCall] = {}  # calls as run (hooks may have changed their input)
+        parsed: dict[str, Any] = {}  # validated input per call, in the form the handler takes
         to_run: list[ToolCall] = []
         asked: list[PendingConfirmation] = []
 
@@ -147,9 +149,10 @@ class Agent:
             if tool is None:
                 outcomes[call.id] = (ToolResult(f"Unknown tool: {call.name}", True), "unknown")
                 continue
-            problem = _check_input(tool.input_schema, call.input)
-            if problem:
-                outcomes[call.id] = (ToolResult(problem, True), "error")
+            try:
+                parsed[call.id] = tool.parse(call.input)
+            except ToolInputError as e:
+                outcomes[call.id] = (ToolResult(str(e), True), "error")
                 continue
 
             verdict = None
@@ -157,9 +160,10 @@ class Agent:
                 outcome = await _maybe_await(hook.before_tool(call, ctx))
                 if isinstance(outcome, Modify):
                     call = replace(call, input=outcome.input)
-                    problem = _check_input(tool.input_schema, call.input)
-                    if problem:
-                        verdict = (ToolResult(problem, True), "error")
+                    try:
+                        parsed[call.id] = tool.parse(call.input)
+                    except ToolInputError as e:
+                        verdict = (ToolResult(str(e), True), "error")
                         break
                 elif isinstance(outcome, (Deny, Confirm)):
                     verdict = outcome
@@ -198,7 +202,7 @@ class Agent:
 
         async def execute(call: ToolCall) -> tuple[ToolResult, str]:
             try:
-                value = await _maybe_await(self.tools.get(call.name).handler(call.input, ctx))
+                value = await _maybe_await(self.tools.get(call.name).handler(parsed[call.id], ctx))
                 return ToolResult(value), "ok"
             except Exception as e:  # a failing tool must not kill the run
                 return ToolResult(f"{type(e).__name__}: {e}", True), "error"
