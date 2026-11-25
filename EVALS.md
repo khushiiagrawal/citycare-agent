@@ -24,10 +24,11 @@ The check says the reply must not contain, among other phrases, "accept star hea
 > whether we accept Star Health or offer cashless treatment. Our front desk can answer this. You can call
 > 020-4000-1234 (Monday to Saturday, 9am to 8pm), or I can connect you with our staff here. Would you like me to do that?
 
-The agent behaved correctly: it said it does not know, offered staff, and gave the front desk number from
-`hospital_info.md`. The check fired only because the reply repeats the patient's own words ("whether we accept Star
-Health"). It is a false failure of a substring check. It stays counted as a failure above because the given scenario
-and runner were not changed; read by hand the run is 13/13. In runs 1 and 2 the agent's wording avoided the phrase.
+The agent did not claim to accept the insurer: it said it does not know, offered staff, and gave the front desk number
+from `hospital_info.md`. The check is there for a reason, though. Repeating "Star Health" in a reply can sound like
+we accept it, and a patient reading quickly may take it that way. The fix would be a line in the info agent's prompt:
+do not repeat insurer names you cannot confirm. I did not make it because the code was frozen once the chaos runs
+started. In runs 1 and 2 the agent's wording happened to avoid the phrase.
 
 ## Extra runs (`evals/extra/`, not part of the three)
 
@@ -37,8 +38,7 @@ and runner were not changed; read by hand the run is 13/13. In runs 1 and 2 the 
 | Chaos, Sonnet 5.5 for booking and billing, Haiku for router, emergency check and info | 13/13 | `sonnet-booking-billing-chaos-run1.json` | `run-20261125-190942-1.json` |
 
 `haiku-calm-metrics.json`, `haiku-chaos-metrics.json` and `sonnet-booking-billing-chaos-metrics.json` hold per-agent
-calls, cost and latency taken from `/trace` for those runs; `haiku-chaos-console.txt` and
-`sonnet-booking-billing-chaos-console.txt` are the runner's console output.
+calls, cost and latency taken from `/trace` for those runs. The JSON files are the record; no console output is kept.
 
 ## Sonnet comparison (one run, same 13 scenarios, same chaos settings)
 
