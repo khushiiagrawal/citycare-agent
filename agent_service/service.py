@@ -45,12 +45,18 @@ class Conversation:
     phone: str
     shared: dict = field(default_factory=dict)  # becomes ctx.state of every agent: phone, language, name, flags
     last_agent: str | None = None
+    pending_agent: str | None = None  # the agent whose read-back is waiting for the patient's answer
+    touched: str | None = None  # the agent that handled the current message, if any
     recent: deque = field(default_factory=lambda: deque(maxlen=6))  # (who, text), for the router and handovers
 
     @property
     def ctx(self) -> RunContext:
         """A context over the shared dict, so the state helpers (flag_handoff...) work on it."""
         return RunContext(key="", state=self.shared)
+
+
+class SessionOwnedByAnotherPhone(Exception):
+    """A session id was used with a different phone number than the one that started the chat."""
 
 
 class FrontDesk:
@@ -82,12 +88,14 @@ class FrontDesk:
     # ------------------------------------------------------------------ the public entry points
 
     async def chat(self, req: ChatRequest) -> ChatResponse:
-        """Raises PermissionError if the session belongs to another phone number, SessionBusy if another
-        message of the same chat is still being handled for too long."""
+        """Raises SessionOwnedByAnotherPhone if the session belongs to another phone number (the app answers
+        403), SessionBusy if another message of the same chat is still being handled for too long."""
         conv = self._conversation(req)
         async with self.store.lock(req.session_id, LOCK_TIMEOUT_S):
             conv.shared["phone"] = req.phone  # always the verified number from the request
+            conv.touched = None
             response = await self._respond(conv, req)
+            await self._expire_unseen_confirmations(req.session_id, conv)
             conv.recent.append(("Patient", req.message[:300]))
             conv.recent.append(("Assistant", response.reply[:300]))
             return response
@@ -108,7 +116,7 @@ class FrontDesk:
                 self._conversations.popitem(last=False)
         elif conv.phone != req.phone:
             # A session id is not a secret: it must never open another patient's conversation.
-            raise PermissionError("This session belongs to another phone number.")
+            raise SessionOwnedByAnotherPhone("This session belongs to another phone number.")
         self._conversations.move_to_end(req.session_id)
         return conv
 
@@ -122,6 +130,11 @@ class FrontDesk:
             if verdict.language and not shared.get("language"):
                 shared["language"] = verdict.language
             return self._safety(conv, sid, verdict.source or "regex", verdict.category, verdict.language)
+
+        if conv.pending_agent:
+            # A read-back is waiting for the patient's answer, so this message belongs to the agent that asked.
+            # No router: it could send "yes" somewhere else. The emergency check above has already run.
+            return await self._specialist(conv, req, conv.pending_agent)
 
         try:
             route = await self.router.route(req.message, sid, last_agent=conv.last_agent, recent=list(conv.recent))
@@ -142,6 +155,7 @@ class FrontDesk:
 
     async def _specialist(self, conv: Conversation, req: ChatRequest, name: str) -> ChatResponse:
         shared = conv.shared
+        conv.touched = name
         if name != conv.last_agent and conv.recent:
             shared["recent"] = "\n".join(f"{who}: {said}" for who, said in conv.recent)
         else:
@@ -154,10 +168,26 @@ class FrontDesk:
         except Exception as e:  # model outage after retries, or a bug: the patient still gets an honest answer
             return self._trouble(conv, req.session_id, f"{name}_failed", e)
         conv.last_agent = name
+        session = await self.store.load(f"{req.session_id}::{name}")
+        conv.pending_agent = name if session.ctx.pending else None
         if result.stop_reason not in ("end_turn", "paused") or not result.text.strip():
             return self._trouble(conv, req.session_id, f"{name}_{result.stop_reason}", result.reason or "")
         return ChatResponse(reply=result.text, agent=name, handoff=is_handoff(conv.ctx),
                             emergency=bool(shared.get("emergency")), trace_id=result.trace_id)
+
+    async def _expire_unseen_confirmations(self, sid: str, conv: Conversation) -> None:
+        """A read-back is only good for the patient's very next message, and only with the agent that asked.
+        An agent's own turn counter does not move while others handle the chat, so without this a "yes" many
+        messages later could still confirm an old question. Whoever did not handle this message forgets theirs."""
+        for name in SPECIALISTS:
+            key = f"{sid}::{name}"
+            if name != conv.touched and key in self.store:
+                session = await self.store.load(key)
+                if session.ctx.pending:
+                    session.ctx.pending.clear()
+                    await self.store.save(session)
+        if conv.pending_agent and conv.pending_agent != conv.touched:
+            conv.pending_agent = None
 
     # ------------------------------------------------------------------ replies written by code
 

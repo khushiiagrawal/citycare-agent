@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from agent_service.app import create_app
 from agent_service.config import Settings
 from agent_service.schemas import ChatRequest
-from agent_service.service import FrontDesk
+from agent_service.service import FrontDesk, SessionOwnedByAnotherPhone
 from tests.fake_claude import FakeClaude, text, tool_use
 from tests.helpers import FREE_SLOT, NEW_PHONE, with_mock
 
@@ -146,7 +146,7 @@ BOOK = {"doctor_id": "d5", "start": FREE_SLOT, "patient_name": "Ravi Kumar"}
 async def test_a_booking_needs_the_read_back_and_then_a_yes(mock):
     d, fake = desk(mock,
                    OK(), routed("booking", name="Ravi Kumar"), tool_use("book_appointment", BOOK),
-                   OK(), routed("booking"), tool_use("book_appointment", BOOK), text("Done! I've booked your appointment."))
+                   OK(), tool_use("book_appointment", BOOK), text("Done! I've booked your appointment."))  # no router: a read-back is pending
     first = await chat(d, "Book Dr. Khan on 2 Dec at 10am, I'm Ravi Kumar")
     assert first.agent == "booking" and "Please confirm: book Dr. Imran Khan" in first.reply and "Ravi Kumar" in first.reply
     assert not [a for a in (await mock.state())["appointments"] if a["phone"] == NEW_PHONE]  # nothing yet
@@ -220,8 +220,129 @@ async def test_the_handoff_flag_stays_on_for_the_rest_of_the_chat(mock):
 async def test_one_session_cannot_be_used_from_another_phone(mock):
     d, _ = desk(mock, OK(), routed("info"), text("hello"))
     await chat(d, "hi", phone=PRIYA, session="shared-id")
-    with pytest.raises(PermissionError):
+    with pytest.raises(SessionOwnedByAnotherPhone):
         await chat(d, "what did she say?", phone=ARJUN, session="shared-id")
+
+
+# ------------------------------------------------------------------ a pending confirmation goes straight back
+
+
+def pending_of(d, sid, agent):
+    return d.store.load(f"{sid}::{agent}")
+
+
+@with_mock
+async def test_the_message_after_a_read_back_skips_the_router_and_goes_to_the_same_agent(mock):
+    d, fake = desk(mock,
+                   OK(), routed("booking", name="Ravi Kumar"), tool_use("book_appointment", BOOK),
+                   OK(), tool_use("book_appointment", BOOK), text("Done! I've booked your appointment."))
+    await chat(d, "Book Dr. Khan on 2 Dec at 10am, I'm Ravi Kumar")
+    second = await chat(d, "yes")
+    assert models(fake) == ["emergency", "router", "booking", "emergency", "booking", "booking"]
+    assert second.agent == "booking" and "booked" in second.reply
+    assert len([a for a in (await mock.state())["appointments"] if a["phone"] == NEW_PHONE]) == 1
+
+
+@with_mock
+async def test_the_emergency_check_still_comes_first_when_a_confirmation_is_pending(mock):
+    d, fake = desk(mock, OK(), routed("booking"), tool_use("book_appointment", BOOK))
+    await chat(d, "Book Dr. Khan on 2 Dec at 10am")
+    r = await chat(d, "yes but wait, मुझे सीने में दर्द हो रहा है")
+    assert (r.agent, r.emergency) == ("safety", True) and models(fake) == ["emergency", "router", "booking"]
+    assert not [a for a in (await mock.state())["appointments"] if a["phone"] == NEW_PHONE]
+
+
+@with_mock
+async def test_after_the_pending_question_is_answered_the_router_is_used_again(mock):
+    d, fake = desk(mock,
+                   OK(), routed("booking"), tool_use("book_appointment", BOOK),
+                   OK(), text("No problem, tell me what to change."),
+                   OK(), routed("info"), text("We open at 10am."))
+    await chat(d, "Book Dr. Khan on 2 Dec at 10am")
+    await chat(d, "no, change it")  # goes to booking without the router; no new confirmation is pending
+    r = await chat(d, "what time do you open?")
+    assert r.agent == "info"
+    assert models(fake) == ["emergency", "router", "booking", "emergency", "booking", "emergency", "router", "info"]
+
+
+@with_mock
+async def test_a_turn_handled_by_something_else_expires_the_old_confirmation(mock):
+    d, _ = desk(mock, OK(), routed("booking"), tool_use("book_appointment", BOOK))
+    await chat(d, "Book Dr. Khan on 2 Dec at 10am")
+    assert (await pending_of(d, "s1", "booking")).ctx.pending  # waiting for the yes
+    await chat(d, "he is unconscious")  # the safety reply handled this turn, not the booking agent
+    assert (await pending_of(d, "s1", "booking")).ctx.pending == []
+    assert d._conversations["s1"].pending_agent is None
+
+
+@with_mock
+async def test_another_agent_handling_a_turn_expires_a_confirmation_pending_elsewhere(mock):
+    d, _ = desk(mock, OK(), routed("booking"), tool_use("book_appointment", BOOK),
+                OK(), routed("info"), text("We open at 10am."))
+    await chat(d, "Book Dr. Khan on 2 Dec at 10am")
+    d._conversations["s1"].pending_agent = None  # as if the shortcut did not apply (e.g. a restarted marker)
+    await chat(d, "what time do you open?")
+    assert (await pending_of(d, "s1", "booking")).ctx.pending == []
+
+
+@with_mock
+async def test_an_outage_on_the_pending_agent_keeps_the_confirmation_so_the_patient_can_say_yes_again(mock):
+    d, fake = desk(mock,
+                   OK(), routed("booking"), tool_use("book_appointment", BOOK),
+                   OK(), Exception("outage"),
+                   OK(), tool_use("book_appointment", BOOK), text("Done, I've booked your appointment."))
+    await chat(d, "Book Dr. Khan on 2 Dec at 10am")
+    trouble = await chat(d, "yes")
+    assert trouble.agent == "human" and trouble.handoff
+    third = await chat(d, "yes")
+    assert third.agent == "booking" and "booked" in third.reply
+    assert len([a for a in (await mock.state())["appointments"] if a["phone"] == NEW_PHONE]) == 1
+
+
+@with_mock
+async def test_a_confirmation_never_outlives_a_turn_the_pending_agent_did_not_see(mock):
+    d, _ = desk(mock, OK(), routed("booking"), tool_use("book_appointment", BOOK),
+                OK(), routed("human"),
+                OK(), routed("booking"), tool_use("book_appointment", BOOK))
+    await chat(d, "Book Dr. Khan on 2 Dec at 10am")
+    d._conversations["s1"].pending_agent = None
+    await chat(d, "talk to a person")  # human handoff in between
+    third = await chat(d, "yes")
+    # the old confirmation expired, so this is asked again instead of being booked
+    assert not [a for a in (await mock.state())["appointments"] if a["phone"] == NEW_PHONE]
+    assert "Please confirm" in third.reply
+
+
+# ------------------------------------------------------------------ the hospital name comes from settings
+
+
+@with_mock
+async def test_the_hospital_name_in_every_prompt_comes_from_settings(mock):
+    s = Settings.from_env({"HOSPITAL_NAME": "Sunrise Clinic, Delhi"})
+    fake = FakeClaude([])
+    d = FrontDesk(fake, mock.client, s, hospital_info="OPD 10am")
+    prompts = [a.system for a in d.agents.values()] + [d.router.agent.system]
+    for prompt in prompts:
+        assert "Sunrise Clinic, Delhi" in prompt and "City Care" not in prompt
+    assert Settings.from_env({}).hospital_name == "City Care Hospital, Pune"
+
+
+# ------------------------------------------------------------------ another phone gets 403, never 500
+
+
+@with_mock
+async def test_the_other_phone_is_refused_before_anything_runs_and_the_owner_is_unaffected(mock):
+    d, fake = desk(mock, OK(), routed("info"), text("hello"), OK(), routed("info"), text("still here"))
+    await chat(d, "hi", phone=PRIYA, session="owned")
+    calls = len(fake.messages.calls)
+    with pytest.raises(SessionOwnedByAnotherPhone):
+        await chat(d, "what did she say?", phone=ARJUN, session="owned")
+    assert len(fake.messages.calls) == calls  # no model call, no emergency check, nothing learned
+    assert (await chat(d, "hello again", phone=PRIYA, session="owned")).reply == "still here"
+
+
+def test_it_is_not_an_os_error():
+    assert not issubclass(SessionOwnedByAnotherPhone, OSError)  # a real file-permission error must not look like this
 
 
 # ------------------------------------------------------------------ /trace and the HTTP app

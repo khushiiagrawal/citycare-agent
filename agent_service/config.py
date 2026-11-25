@@ -3,7 +3,8 @@ Sonnet while the rest stay on Haiku:
 
     BOOKING_MODEL=claude-sonnet-5-5 BOOKING_EFFORT=medium uvicorn agent_service.app:app
 
-Variables: ROUTER_, EMERGENCY_, BOOKING_, BILLING_, INFO_ + MODEL or EFFORT (low|medium|high|xhigh|max)."""
+Variables: ROUTER_, EMERGENCY_, BOOKING_, BILLING_, INFO_ + MODEL or EFFORT (low|medium|high|xhigh|max).
+HOSPITAL_NAME is the name used in the prompts."""
 
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from typing import Mapping
 from agentcore.trace import Price
 
 HAIKU = "claude-haiku-5-5"
+DEFAULT_HOSPITAL_NAME = "City Care Hospital, Pune"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 # Dollars per million tokens (context.md section 6). Cache reads and writes follow Price's defaults.
@@ -42,6 +44,7 @@ class Settings:
     booking: ModelSetting
     billing: ModelSetting
     info: ModelSetting
+    hospital_name: str = DEFAULT_HOSPITAL_NAME
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -54,7 +57,8 @@ class Settings:
             return ModelSetting(env.get(f"{name}_MODEL") or HAIKU, chosen)
 
         return cls(router=one("ROUTER"), emergency=one("EMERGENCY"), booking=one("BOOKING"),
-                   billing=one("BILLING"), info=one("INFO"))
+                   billing=one("BILLING"), info=one("INFO"),
+                   hospital_name=env.get("HOSPITAL_NAME") or DEFAULT_HOSPITAL_NAME)
 
 
 def request_params(setting: ModelSetting, role: str) -> dict:

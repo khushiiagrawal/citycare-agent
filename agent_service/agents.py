@@ -18,8 +18,8 @@ from .config import ModelSetting, Settings, price_for, request_params
 from .emergency import CLASSIFIER_SYSTEM, EmergencyCheck
 from .guards import ClaimGuard, KnownFacts, NoMedicalAdvice
 from .hooks import build_hooks
-from .prompts import BILLING, BOOKING, info_prompt
-from .router import ROUTER_SYSTEM, Router
+from .prompts import billing_prompt, booking_prompt, info_prompt
+from .router import Router, router_system
 from .tools import Hospital, build_handoff_tool, build_tools
 
 HOSPITAL_INFO = Path(__file__).resolve().parent.parent / "hospital_info.md"
@@ -35,7 +35,7 @@ def _classifier(client: Any, setting: ModelSetting, system: str, name: str, trac
 
 
 def build_router(client: Any, settings: Settings, *, tracer: Tracer | None = None) -> Agent:
-    return _classifier(client, settings.router, ROUTER_SYSTEM, "router", tracer, 200)
+    return _classifier(client, settings.router, router_system(settings.hospital_name), "router", tracer, 200)
 
 
 def build_emergency_check(client: Any, settings: Settings, *, tracer: Tracer | None = None) -> EmergencyCheck:
@@ -66,9 +66,9 @@ def build_agents(
         )
 
     return {
-        "booking": make("booking", settings.booking, BOOKING, BOOKING_TOOLS),
-        "billing": make("billing", settings.billing, BILLING, BILLING_TOOLS),
-        "info": make("info", settings.info, info_prompt(info), []),
+        "booking": make("booking", settings.booking, booking_prompt(settings.hospital_name), BOOKING_TOOLS),
+        "billing": make("billing", settings.billing, billing_prompt(settings.hospital_name), BILLING_TOOLS),
+        "info": make("info", settings.info, info_prompt(info, settings.hospital_name), []),
     }
 
 

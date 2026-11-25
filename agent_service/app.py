@@ -17,7 +17,7 @@ from agentcore.session import SessionBusy  # noqa: E402
 
 from .hospital import HospitalClient  # noqa: E402
 from .schemas import ChatRequest, ChatResponse  # noqa: E402
-from .service import FrontDesk  # noqa: E402
+from .service import FrontDesk, SessionOwnedByAnotherPhone  # noqa: E402
 
 
 async def default_service() -> FrontDesk:
@@ -51,7 +51,7 @@ def create_app(factory: Callable[[], Awaitable[FrontDesk]] = default_service) ->
         desk = await service()
         try:
             return await desk.chat(req)
-        except PermissionError:
+        except SessionOwnedByAnotherPhone:
             raise HTTPException(status_code=403, detail="This session belongs to another phone number.")
         except SessionBusy:
             raise HTTPException(status_code=409, detail="Another message in this chat is still being handled.")
