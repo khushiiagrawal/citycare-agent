@@ -12,8 +12,7 @@ from agentcore.types import Registry
 from tests.fake_claude import FakeClaude
 
 ROOT = Path(__file__).resolve().parent.parent
-# naive_agent.py is the starter code; it is deleted when /chat moves to the new agents.
-LEGACY = {"naive_agent.py"}
+LEGACY: set[str] = set()  # files exempt from the scan (none: the naive agent is gone)
 
 
 def _agent(client):

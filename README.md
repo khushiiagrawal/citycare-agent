@@ -9,7 +9,7 @@ Starter code for the **agentcore** assignment. Read [`context.md`](context.md) f
 | `context.md` | The product, the hospital rules, the hospital system, models and cost, evals. Read first |
 | `hospital_info.md` | The only facts the info agent may use |
 | `mock_hospital/` | A fake hospital system (appointments and billing) with a chaos mode. Read it, don't change how it behaves |
-| `agent_service/` | The FastAPI app with `POST /chat`, and `naive_agent.py`, which you'll replace |
+| `agent_service/` | The FastAPI app (`POST /chat`, `GET /trace/{session_id}`): emergency check, router, booking / billing / info agents |
 | `evals/` | 10 scenarios and a runner that checks what really happened |
 | `tests/` | Example tests and `fake_claude.py`, a scripted Claude client so tests run without a key |
 | `tools/pack_sessions.py` | Packs your Claude Code transcripts for hand-in (see [Hand-in](#hand-in)) |

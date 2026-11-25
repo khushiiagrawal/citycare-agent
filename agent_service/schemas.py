@@ -11,7 +11,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
 
 
-AgentName = Literal["booking", "billing", "info", "human", "safety", "naive"]
+AgentName = Literal["booking", "billing", "info", "human", "safety"]
 
 
 class ChatResponse(BaseModel):
