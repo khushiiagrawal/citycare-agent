@@ -52,6 +52,9 @@ class Agent:
     `name` labels the agent in traces.
     `retry` retries model calls that fail for temporary reasons (None turns it off). When it
     gives up it raises ModelUnavailable. `budget` stops a run that spends too much.
+    `cache=True` puts prompt-cache breakpoints on the system prompt and on the end of the tool list,
+    so every call after the first in a conversation reads them at the cached price. (The API only caches
+    prefixes above a model-specific minimum size; a shorter one is simply sent at the normal price.)
     """
 
     def __init__(
@@ -71,6 +74,7 @@ class Agent:
         tracer: Tracer | None = None,
         retry: RetryPolicy | None = RetryPolicy(),
         budget: Budget | None = None,
+        cache: bool = False,
     ) -> None:
         reject_sync_client(client)
         self.client = client
@@ -87,6 +91,7 @@ class Agent:
         self.tracer = tracer
         self.retry = retry
         self.budget = budget
+        self.cache = cache
 
     async def run(self, messages: list[dict], ctx: RunContext | None = None) -> RunResult:
         """Run until the model stops asking for tools. `messages` is not modified;
@@ -197,15 +202,19 @@ class Agent:
         return used
 
     async def _call_model(self, messages: list[dict], trace: Trace) -> tuple[Any, _Usage]:
+        mark = {"cache_control": {"type": "ephemeral"}}
         kwargs: dict = {
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "system": self.system,
+            "system": [{"type": "text", "text": self.system, **mark}] if self.cache else self.system,
             "messages": messages,
             **self.request_params,
         }
         if len(self.tools):
-            kwargs["tools"] = self.tools.api_schemas()
+            schemas = self.tools.api_schemas()
+            if self.cache:  # a copy: the registry's own schemas stay untouched
+                schemas = [*schemas[:-1], {**schemas[-1], **mark}]
+            kwargs["tools"] = schemas
         attempts = self.retry.max_attempts if self.retry else 1
         for attempt in range(1, attempts + 1):
             started_at, clock = time.time(), time.perf_counter()
