@@ -20,6 +20,7 @@ from typing import Any
 from agentcore.hooks import ConfirmGate, Deny, Hook
 from agentcore.types import RunContext, ToolCall, ToolResult
 
+from .i18n import lang_of, readback, slot_text
 from .hospital import IST, NotFound, Unavailable, parse_time, same_time
 from .state import failures, flag_handoff, phone_of, record_failure
 from .tools import Hospital
@@ -103,16 +104,17 @@ class FourHourRule(Hook):
 # ------------------------------------------------------------------ confirmation read-backs
 
 
-def fmt_slot(start: str) -> str:
-    dt = parse_time(start).astimezone(IST)
-    return f"{dt:%A}, {dt.day} {dt:%b %Y} at {dt.strftime('%I:%M %p').lstrip('0')}"
+def fmt_slot(start: str, language: str = "en") -> str:
+    return slot_text(parse_time(start).astimezone(IST), language)
 
 
-_FOOTER = "Reply YES to confirm (haan / हाँ), or tell me what to change."
+def _lang(ctx: RunContext) -> str:
+    return lang_of(ctx.state.get("language"))
 
 
 class ReadBacks:
-    """Builds each confirmation question from the real data. The model never writes it."""
+    """Builds each confirmation question from the real data, in the patient's language. The model never
+    writes it: the wording is fixed text (i18n.py) and the facts come from the hospital system."""
 
     def __init__(self, hospital: Hospital) -> None:
         self.hospital = hospital
@@ -146,7 +148,7 @@ class ReadBacks:
         if (problem := await self._free(a["doctor_id"], a["start"])) is not None:
             return problem
         doctor = await self.hospital.doctor_name(a["doctor_id"])
-        return f"Please confirm: book {doctor} on {fmt_slot(a['start'])} for {a['patient_name']}? {_FOOTER}"
+        return readback("book", _lang(ctx), doctor=doctor, slot=fmt_slot(a["start"], _lang(ctx)), name=a["patient_name"])
 
     async def reschedule(self, call: ToolCall, ctx: RunContext) -> str | Deny:
         a = call.input
@@ -156,15 +158,16 @@ class ReadBacks:
         if (problem := await self._free(appt["doctor_id"], a["new_start"])) is not None:
             return problem
         doctor = await self.hospital.doctor_name(appt["doctor_id"])
-        return (f"Please confirm: move your appointment with {doctor} from {fmt_slot(appt['start'])} "
-                f"to {fmt_slot(a['new_start'])}? {_FOOTER}")
+        lang = _lang(ctx)
+        return readback("reschedule", lang, doctor=doctor, old=fmt_slot(appt["start"], lang),
+                        new=fmt_slot(a["new_start"], lang))
 
     async def cancel(self, call: ToolCall, ctx: RunContext) -> str | Deny:
         appt = await self._own_booked(ctx, call.input["appointment_id"])
         if isinstance(appt, Deny):
             return appt
         doctor = await self.hospital.doctor_name(appt["doctor_id"])
-        return f"Please confirm: cancel your appointment with {doctor} on {fmt_slot(appt['start'])}? {_FOOTER}"
+        return readback("cancel", _lang(ctx), doctor=doctor, slot=fmt_slot(appt["start"], _lang(ctx)))
 
     async def payment(self, call: ToolCall, ctx: RunContext) -> str | Deny:
         try:
@@ -176,8 +179,7 @@ class ReadBacks:
             return Deny(_NOT_ANSWERING)
         if bill["status"] == "paid":
             return Deny("This bill is already paid, so there is nothing to pay. Nothing was changed.")
-        return (f"Please confirm: send a payment link for bill {bill['id']} "
-                f"(Rs {bill['amount_inr']}, {bill['description']})? {_FOOTER}")
+        return readback("payment", _lang(ctx), bill=bill["id"], amount=bill["amount_inr"], description=bill["description"])
 
     async def _own_booked(self, ctx: RunContext, appointment_id: str) -> dict | Deny:
         try:
