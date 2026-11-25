@@ -45,7 +45,9 @@ class Agent:
 
     `client` is `anthropic.AsyncAnthropic`, or a test fake with `messages.create(...)`
     (the fake's result may be awaitable or not). Sync Anthropic clients are rejected.
-    `max_writes_per_run` caps calls to tools marked `writes=True` across the whole run.
+    `max_writes_per_run` caps calls to tools marked `writes=True` across the whole run. A write that raises an
+    exception with `changed_nothing = True` (the system refused it, nothing happened) is given back: it does not
+    use up the cap, so the model can try something else in the same run.
     `hooks` run around the model and its tools (see hooks.py).
     `price` turns token counts into dollars (`result.cost_usd`); without it cost is 0.
     `tracer` keeps a trace of every model and tool call, grouped by `ctx.key`.
@@ -334,6 +336,7 @@ class Agent:
             to_run.append(call)
 
         timing: dict[str, tuple[float, float]] = {}  # call id -> (unix start, seconds)
+        refused: set[str] = set()  # writes that failed and changed nothing
 
         async def execute(call: ToolCall) -> tuple[ToolResult, str]:
             started_at, clock = time.time(), time.perf_counter()
@@ -341,11 +344,15 @@ class Agent:
                 value = await _maybe_await(self.tools.get(call.name).handler(parsed[call.id], ctx))
                 return ToolResult(value), "ok"
             except Exception as e:  # a failing tool must not kill the run
+                if getattr(e, "changed_nothing", False):
+                    refused.add(call.id)
                 return ToolResult(f"{type(e).__name__}: {e}", True), "error"
             finally:
                 timing[call.id] = (started_at, time.perf_counter() - clock)
 
-        for call, (res, kind) in zip(to_run, await asyncio.gather(*(execute(c) for c in to_run))):
+        finished = await asyncio.gather(*(execute(c) for c in to_run))
+        writes -= sum(1 for c in to_run if c.id in refused and self.tools.get(c.name).writes)
+        for call, (res, kind) in zip(to_run, finished):
             for hook in self.hooks:
                 replaced = await _maybe_await(hook.after_tool(call, res, ctx))
                 if replaced is not None:

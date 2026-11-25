@@ -77,18 +77,22 @@ def claims(reply: str) -> set[str]:
 class ClaimGuard(Hook):
     """Rule 9. Tracks what really worked in this turn, and replaces a final reply that claims more.
 
-    Evidence for a claim: a write tool of that kind that succeeded in this turn, or (for describing what is
-    already there) an appointments lookup in this turn that shows a booked or cancelled appointment."""
+    Evidence for a claim: a write tool of that kind that succeeded in this turn; an appointments lookup in this
+    turn that shows a booked or cancelled appointment; or, for describing what was done earlier in the chat
+    ("so is it booked?"), a success of that same kind earlier, as long as no write failed in this turn."""
 
     def after_tool(self, call: ToolCall, result: ToolResult, ctx: RunContext) -> Any:
         marker = f"{ctx.key}:{ctx.turn}"
         done = ctx.state.get("evidence")
         if not done or done[0] != marker:  # a new turn: forget the last one
-            done = ctx.state["evidence"] = (marker, set())
+            done = ctx.state["evidence"] = (marker, set(), [])
         if result.is_error:
+            if call.name in _WRITE_KIND:
+                done[2].append(call.name)  # a write failed this turn: earlier successes prove nothing about it
             return None
         if call.name in _WRITE_KIND:
             done[1].add(_WRITE_KIND[call.name])
+            ctx.state.setdefault("written", set()).add(_WRITE_KIND[call.name])
         elif call.name == "my_appointments" and isinstance(result.content, list):
             statuses = {a.get("status") for a in result.content if isinstance(a, dict)}
             if "booked" in statuses:
@@ -102,7 +106,10 @@ class ClaimGuard(Hook):
         if not reply:
             return None
         done = ctx.state.get("evidence")
-        proven = done[1] if done and done[0] == f"{ctx.key}:{ctx.turn}" else set()
+        this_turn = done is not None and done[0] == f"{ctx.key}:{ctx.turn}"
+        proven = set(done[1]) if this_turn else set()
+        if not (this_turn and done[2]):
+            proven |= ctx.state.get("written", set())
         if claims(reply) - proven:
             flag_handoff(ctx, "unverified_claim")
             return with_text(response, UNVERIFIED[lang_of(ctx.state.get("language"))])

@@ -14,16 +14,22 @@ def lang_of(value: object) -> str:
     return value if value in LANGUAGES else "en"
 
 
-EMERGENCY = {
-    "en": ("This sounds like an emergency. Please call 108 right now or go to the nearest emergency room. "
-           "Our Emergency department at City Care Hospital (12 MG Road, Camp, Pune, main entrance) is open 24 hours. "
+EMERGENCY = {  # {number}, {name} and {address} come from the settings
+    "en": ("This sounds like an emergency. Please call {number} right now or go to the nearest emergency room. "
+           "Our Emergency department at {name} ({address}, main entrance) is open 24 hours. "
            "Our staff have been alerted."),
-    "hi": ("यह आपातकाल लग रहा है। कृपया अभी 108 पर कॉल करें या नज़दीकी इमरजेंसी रूम में जाएँ। "
-           "सिटी केयर हॉस्पिटल का इमरजेंसी विभाग (12 एमजी रोड, कैंप, पुणे, मुख्य द्वार) 24 घंटे खुला रहता है। "
+    "hi": ("यह आपातकाल लग रहा है। कृपया अभी {number} पर कॉल करें या नज़दीकी इमरजेंसी रूम में जाएँ। "
+           "{name} ({address}, मुख्य द्वार) का इमरजेंसी विभाग 24 घंटे खुला रहता है। "
            "हमारे स्टाफ़ को सूचित कर दिया गया है।"),
-    "hinglish": ("Yeh emergency lag rahi hai. Please abhi 108 par call karein ya sabse nazdeeki emergency room mein jaiye. "
-                 "City Care Hospital ka Emergency department (12 MG Road, Camp, Pune, main entrance) 24 ghante khula rehta hai. "
+    "hinglish": ("Yeh emergency lag rahi hai. Please abhi {number} par call karein ya sabse nazdeeki emergency room mein jaiye. "
+                 "{name} ({address}, main entrance) ka Emergency department 24 ghante khula rehta hai. "
                  "Humare staff ko bata diya gaya hai."),
+}
+
+SLOT_TAKEN = {
+    "en": "Sorry, that time was just taken by someone else.",
+    "hi": "माफ़ कीजिए, वह समय अभी किसी और ने ले लिया।",
+    "hinglish": "Sorry, woh time abhi kisi aur ne le liya.",
 }
 
 

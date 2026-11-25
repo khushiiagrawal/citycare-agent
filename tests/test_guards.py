@@ -133,15 +133,6 @@ async def test_a_failed_booking_does_not_count_and_the_false_claim_is_caught(moc
     assert "is booked" not in result.text and is_handoff(ctx)
 
 
-def test_a_booking_from_an_earlier_turn_does_not_excuse_a_claim_now():
-    guard, ctx = ClaimGuard(), RunContext(key="k")
-    ctx.turn = 1
-    guard.after_tool(ToolCall("1", "book_appointment", {}), ToolResult({"ok": 1}), ctx)
-    ctx.turn = 2
-    reply = guard.after_model(text("I've booked it for you."), ctx)
-    assert reply is not None and "booked" not in reply.content[0].text
-
-
 def test_reading_an_existing_booking_allows_describing_it():
     guard, ctx = ClaimGuard(), RunContext(key="k")
     ctx.turn = 1

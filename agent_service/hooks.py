@@ -20,7 +20,7 @@ from typing import Any
 from agentcore.hooks import ConfirmGate, Deny, Hook
 from agentcore.types import RunContext, ToolCall, ToolResult
 
-from .i18n import lang_of, readback, slot_text
+from .i18n import SLOT_TAKEN, lang_of, readback, slot_text
 from .hospital import IST, NotFound, Unavailable, parse_time, same_time
 from .state import failures, flag_handoff, phone_of, record_failure
 from .tools import Hospital
@@ -143,12 +143,21 @@ class ReadBacks:
             return Deny("That slot is not free. Fetch the free slots again and offer other times. Nothing was changed.")
         return None
 
+    @staticmethod
+    def _with_notice(ctx: RunContext, question: str) -> str:
+        """If a booking was just lost to someone else, say so in front of the next question (once, this turn only)."""
+        turn, kind = ctx.state.pop("notice", (None, None))
+        if turn == ctx.turn and kind == "slot_taken":
+            return f"{SLOT_TAKEN[_lang(ctx)]}\n\n{question}"
+        return question
+
     async def book(self, call: ToolCall, ctx: RunContext) -> str | Deny:
         a = call.input
         if (problem := await self._free(a["doctor_id"], a["start"])) is not None:
             return problem
         doctor = await self.hospital.doctor_name(a["doctor_id"])
-        return readback("book", _lang(ctx), doctor=doctor, slot=fmt_slot(a["start"], _lang(ctx)), name=a["patient_name"])
+        return self._with_notice(ctx, readback("book", _lang(ctx), doctor=doctor, slot=fmt_slot(a["start"], _lang(ctx)),
+                                               name=a["patient_name"]))
 
     async def reschedule(self, call: ToolCall, ctx: RunContext) -> str | Deny:
         a = call.input
@@ -159,8 +168,8 @@ class ReadBacks:
             return problem
         doctor = await self.hospital.doctor_name(appt["doctor_id"])
         lang = _lang(ctx)
-        return readback("reschedule", lang, doctor=doctor, old=fmt_slot(appt["start"], lang),
-                        new=fmt_slot(a["new_start"], lang))
+        return self._with_notice(ctx, readback("reschedule", lang, doctor=doctor, old=fmt_slot(appt["start"], lang),
+                                               new=fmt_slot(a["new_start"], lang)))
 
     async def cancel(self, call: ToolCall, ctx: RunContext) -> str | Deny:
         appt = await self._own_booked(ctx, call.input["appointment_id"])
@@ -234,6 +243,17 @@ class LeakGuard(Hook):
         return ToolResult(cleaned, result.is_error) if cleaned != result.content else None
 
 
+class SlotTakenNotice(Hook):
+    """When a booking or reschedule loses its slot, remember it for this turn so the next read-back (for the
+    time the agent offers instead) starts by telling the patient, in words written by code."""
+
+    def after_tool(self, call: ToolCall, result: ToolResult, ctx: RunContext) -> Any:
+        if (call.name in ("book_appointment", "reschedule_appointment") and result.is_error
+                and str(result.content).startswith("SlotTaken")):
+            ctx.state["notice"] = (ctx.turn, "slot_taken")
+        return None
+
+
 class RepeatedFailureHandoff(Hook):
     """Rule 8: when the agent fails twice in a row, hand over to staff instead of trying a third time."""
 
@@ -249,5 +269,6 @@ def build_hooks(hospital: Hospital) -> list[Hook]:
         FourHourRule(hospital),
         ConfirmGate(ReadBacks(hospital).prompts()),  # last of the before_tool hooks
         LeakGuard(),
+        SlotTakenNotice(),
         RepeatedFailureHandoff(),
     ]

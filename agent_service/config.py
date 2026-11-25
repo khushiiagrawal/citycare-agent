@@ -4,7 +4,8 @@ Sonnet while the rest stay on Haiku:
     BOOKING_MODEL=claude-sonnet-5-5 BOOKING_EFFORT=medium uvicorn agent_service.app:app
 
 Variables: ROUTER_, EMERGENCY_, BOOKING_, BILLING_, INFO_ + MODEL or EFFORT (low|medium|high|xhigh|max).
-HOSPITAL_NAME is the name used in the prompts."""
+HOSPITAL_NAME, HOSPITAL_ADDRESS and EMERGENCY_NUMBER are the facts used in the prompts and in the fixed
+emergency reply (the info agent still gets everything else from hospital_info.md)."""
 
 from __future__ import annotations
 
@@ -16,6 +17,8 @@ from agentcore.trace import Price
 
 HAIKU = "claude-haiku-5-5"
 DEFAULT_HOSPITAL_NAME = "City Care Hospital, Pune"
+DEFAULT_HOSPITAL_ADDRESS = "12 MG Road, Camp, Pune"
+DEFAULT_EMERGENCY_NUMBER = "108"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 # Dollars per million tokens (context.md section 6). Cache reads and writes follow Price's defaults.
@@ -45,6 +48,13 @@ class Settings:
     billing: ModelSetting
     info: ModelSetting
     hospital_name: str = DEFAULT_HOSPITAL_NAME
+    hospital_address: str = DEFAULT_HOSPITAL_ADDRESS
+    emergency_number: str = DEFAULT_EMERGENCY_NUMBER
+
+    @property
+    def short_name(self) -> str:
+        """The name without the city: "City Care Hospital, Pune" -> "City Care Hospital"."""
+        return self.hospital_name.split(",")[0].strip() or self.hospital_name
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -58,7 +68,9 @@ class Settings:
 
         return cls(router=one("ROUTER"), emergency=one("EMERGENCY"), booking=one("BOOKING"),
                    billing=one("BILLING"), info=one("INFO"),
-                   hospital_name=env.get("HOSPITAL_NAME") or DEFAULT_HOSPITAL_NAME)
+                   hospital_name=env.get("HOSPITAL_NAME") or DEFAULT_HOSPITAL_NAME,
+                   hospital_address=env.get("HOSPITAL_ADDRESS") or DEFAULT_HOSPITAL_ADDRESS,
+                   emergency_number=env.get("EMERGENCY_NUMBER") or DEFAULT_EMERGENCY_NUMBER)
 
 
 def request_params(setting: ModelSetting, role: str) -> dict:

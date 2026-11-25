@@ -66,9 +66,9 @@ def build_agents(
         )
 
     return {
-        "booking": make("booking", settings.booking, booking_prompt(settings.hospital_name), BOOKING_TOOLS),
-        "billing": make("billing", settings.billing, billing_prompt(settings.hospital_name), BILLING_TOOLS),
-        "info": make("info", settings.info, info_prompt(info, settings.hospital_name), []),
+        "booking": make("booking", settings.booking, booking_prompt(settings.hospital_name, settings.emergency_number), BOOKING_TOOLS),
+        "billing": make("billing", settings.billing, billing_prompt(settings.hospital_name, settings.emergency_number), BILLING_TOOLS),
+        "info": make("info", settings.info, info_prompt(info, settings.hospital_name, settings.emergency_number), []),
     }
 
 

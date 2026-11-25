@@ -17,6 +17,7 @@ from typing import Literal
 from agentcore.loop import Agent
 from agentcore.types import RunContext
 
+from .config import Settings
 from .i18n import EMERGENCY, lang_of
 
 # ------------------------------------------------------------------ the regex
@@ -136,5 +137,8 @@ class EmergencyCheck:
         return Verdict(words[0] == "emergency", language, None, "model" if words[0] == "emergency" else None, True)
 
 
-def emergency_reply(language: str) -> str:
-    return EMERGENCY[lang_of(language)]
+def emergency_reply(language: str, settings: Settings | None = None) -> str:
+    """The fixed emergency reply, with the hospital's own name, address and emergency number from the settings."""
+    settings = settings or Settings.from_env({})
+    return EMERGENCY[lang_of(language)].format(
+        number=settings.emergency_number, name=settings.short_name, address=settings.hospital_address)

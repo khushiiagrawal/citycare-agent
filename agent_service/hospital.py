@@ -31,6 +31,9 @@ class HospitalError(Exception):
     """Something the hospital system refused or failed to do. `advice` tells the model what to do next."""
 
     advice = ""
+    # True when the hospital refused the request outright, so nothing was changed. The agent loop then does not
+    # count the attempt as a write. Left False when the outcome could be anything (timeouts, unknown).
+    changed_nothing = False
 
     def __init__(self, message: str, code: str = "", status: int | None = None) -> None:
         super().__init__(message)
@@ -41,26 +44,32 @@ class HospitalError(Exception):
 
 
 class SlotTaken(HospitalError):
+    changed_nothing = True
     advice = "Fetch the free slots again and offer the patient other times."
 
 
 class InvalidSlot(HospitalError):
+    changed_nothing = True
     advice = "Check the date and time against the free slots."
 
 
 class InvalidPhone(HospitalError):
+    changed_nothing = True
     advice = "The phone number is not valid."
 
 
 class NotFound(HospitalError):
+    changed_nothing = True
     advice = "Check the id."
 
 
 class NotActive(HospitalError):
+    changed_nothing = True
     advice = "It is not active any more, so it cannot be changed."
 
 
 class AlreadyPaid(HospitalError):
+    changed_nothing = True
     advice = "There is nothing to pay."
 
 

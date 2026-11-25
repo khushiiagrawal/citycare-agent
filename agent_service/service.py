@@ -202,7 +202,7 @@ class FrontDesk:
         shared = conv.shared
         shared["emergency"] = True
         flag_handoff(conv.ctx, "emergency")
-        reply = emergency_reply(language or shared.get("language") or "en")
+        reply = emergency_reply(language or shared.get("language") or "en", self.settings)
         trace_id = self._own_trace(sid, "safety", "emergency", {"source": source, "category": category})
         return ChatResponse(reply=reply, agent="safety", handoff=True, emergency=True, trace_id=trace_id)
 

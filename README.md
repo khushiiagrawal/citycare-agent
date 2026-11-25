@@ -53,6 +53,14 @@ Use the API key we sent you for both Claude Code and your agents. In your termin
 export ANTHROPIC_API_KEY=sk-ant-...        # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
+## Settings (environment variables)
+
+| Variable | Default | What it does |
+|---|---|---|
+| `ROUTER_MODEL`, `EMERGENCY_MODEL`, `BOOKING_MODEL`, `BILLING_MODEL`, `INFO_MODEL` | `claude-haiku-5-5` | Model per agent, so one can move to Sonnet. `*_EFFORT` sets the effort (`low` to `max`) |
+| `HOSPITAL_NAME`, `HOSPITAL_ADDRESS`, `EMERGENCY_NUMBER` | City Care Hospital, Pune / 12 MG Road, Camp, Pune / 108 | Facts used in the prompts and the fixed emergency reply |
+| `TRACE_ENABLED` | `1` | `GET /trace/{session_id}` returns every model and tool call of a chat, including tool outputs such as a patient's appointments and bills, to anyone who knows the session id. Set `0` to turn it off (the URL stays, answers 404). Leave it on only in development and evals |
+
 ## Run it
 
 Terminal 1, the hospital system (calm):

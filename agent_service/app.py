@@ -25,8 +25,17 @@ async def default_service() -> FrontDesk:
     return FrontDesk(make_async_client(timeout=float(os.getenv("MODEL_TIMEOUT_S", "60"))), HospitalClient())
 
 
-def create_app(factory: Callable[[], Awaitable[FrontDesk]] = default_service) -> FastAPI:
-    """`factory` builds the service on first use (so importing this module needs no key). Tests pass their own."""
+def trace_enabled_from_env() -> bool:
+    return os.getenv("TRACE_ENABLED", "1").strip().lower() not in ("0", "false", "off", "no")
+
+
+def create_app(factory: Callable[[], Awaitable[FrontDesk]] = default_service, *, trace_enabled: bool | None = None) -> FastAPI:
+    """`factory` builds the service on first use (so importing this module needs no key). Tests pass their own.
+
+    `GET /trace/{session_id}` returns tool inputs and outputs, which include a patient's appointments and bills,
+    to anyone who knows the session id. Set TRACE_ENABLED=0 (or pass trace_enabled=False) to turn it off: the URL
+    stays the same and answers 404."""
+    trace_enabled = trace_enabled_from_env() if trace_enabled is None else trace_enabled
     holder: dict[str, FrontDesk] = {}
 
     async def service() -> FrontDesk:
@@ -58,6 +67,8 @@ def create_app(factory: Callable[[], Awaitable[FrontDesk]] = default_service) ->
 
     @app.get("/trace/{session_id}")
     async def trace(session_id: str):
+        if not trace_enabled:
+            raise HTTPException(status_code=404, detail="Tracing is disabled on this server")
         traces = (await service()).trace(session_id)
         if not traces:
             raise HTTPException(status_code=404, detail="No trace for this session")
