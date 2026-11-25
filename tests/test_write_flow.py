@@ -189,6 +189,11 @@ def test_the_prompts_tell_the_model_to_call_the_tool_and_never_ask_for_the_confi
     assert "the system asks" in low
 
 
+def test_the_booking_prompt_tells_the_model_to_choose_when_the_patient_lets_it():
+    low = " ".join(booking_prompt("H", "108").lower().split())
+    assert "any morning slot" in low and "do not ask them to pick" in low and "earliest free slot" in low
+
+
 def test_the_booking_prompt_covers_a_lost_slot_and_status_questions():
     low = " ".join(booking_prompt("H", "108").lower().split())
     assert "slot is taken" in low and "same message" in low and "call book_appointment" in low
