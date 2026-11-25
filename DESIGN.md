@@ -64,7 +64,7 @@ A non-emergency message took 2.7 to 5.5 s end to end (scenario time divided by m
 | Booking call: cost, p50 / p90 | $0.00023, 1.41 s / 2.08 s | $0.00377, 1.71 s / 2.40 s |
 | Billing call: cost, p50 / p90 | $0.00009, 1.04 s / 1.56 s | $0.00250, 0.92 s / 1.67 s |
 
-On these scenarios Sonnet did not pass more, and cost about 14 times as much; each call also costs about 16 to 27 times more than on Haiku. One run is not enough to say Sonnet is no better: both models passed nearly everything, so the scenarios cannot separate them. Raw files are in `evals/reported/`.
+On these scenarios Sonnet did not pass more, and cost about 14 times as much; each call also costs about 16 to 27 times more than on Haiku. One run is not enough to say Sonnet is no better: both models passed nearly everything, so the scenarios cannot separate them. Raw files are in `evals/reported/` (the three Haiku chaos runs) and `evals/extra/`; see `EVALS.md`.
 
 ## Phone calls: what would change
 
