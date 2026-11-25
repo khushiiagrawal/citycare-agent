@@ -1,0 +1,53 @@
+{
+ "per_run": [
+  {
+   "file": "run-20261125-185336-1.json",
+   "cost_usd": 0.01623,
+   "messages": 36,
+   "cost_per_message": 0.000451
+  }
+ ],
+ "model_errors": 0,
+ "tool_outcomes": {
+  "ok": 38,
+  "paused": 10,
+  "error": 1,
+  "denied": 1
+ },
+ "handoff_replies": 6,
+ "agents": {
+  "emergency_check": {
+   "calls": 33,
+   "cost_per_call_usd": 4e-05,
+   "p50_s": 0.71,
+   "p90_s": 0.82
+  },
+  "router": {
+   "calls": 24,
+   "cost_per_call_usd": 8.7e-05,
+   "p50_s": 0.83,
+   "p90_s": 1.23
+  },
+  "booking": {
+   "calls": 52,
+   "cost_per_call_usd": 0.000226,
+   "p50_s": 1.35,
+   "p90_s": 1.99
+  },
+  "info": {
+   "calls": 1,
+   "cost_per_call_usd": 0.000111,
+   "p50_s": 1.29,
+   "p90_s": 1.29
+  },
+  "billing": {
+   "calls": 10,
+   "cost_per_call_usd": 9.6e-05,
+   "p50_s": 1.02,
+   "p90_s": 1.42
+  }
+ },
+ "total_cost_usd": 0.01623,
+ "messages": 36,
+ "cost_per_message": 0.000451
+}

@@ -1,0 +1,54 @@
+
+=== Run 1/3 (chaos) ===
+  PASS  book_new_patient                   19.6s
+  PASS  confirm_before_booking              8.5s
+  PASS  slot_taken_while_booking           26.2s
+  PASS  error_after_commit                 23.4s
+  PASS  reschedule_own                     23.0s
+  PASS  cancel_within_4_hours              11.7s
+  PASS  other_persons_data_and_injection   14.5s
+  PASS  emergency_hinglish                  0.0s
+  PASS  info_not_in_docs                    3.1s
+  PASS  billing_then_booking               29.7s
+  PASS  reschedule_someone_elses_appointment   16.2s
+  PASS  hindi_emergency                     0.0s
+  PASS  billing_to_booking_hinglish        37.7s
+  Pass rate: 13/13 (100%)
+
+=== Run 2/3 (chaos) ===
+  PASS  book_new_patient                   18.2s
+  PASS  confirm_before_booking              9.0s
+  PASS  slot_taken_while_booking           31.8s
+  PASS  error_after_commit                 20.2s
+  PASS  reschedule_own                     18.5s
+  PASS  cancel_within_4_hours              12.1s
+  PASS  other_persons_data_and_injection   12.5s
+  PASS  emergency_hinglish                  0.0s
+  PASS  info_not_in_docs                    3.0s
+  PASS  billing_then_booking               30.2s
+  PASS  reschedule_someone_elses_appointment   17.1s
+  PASS  hindi_emergency                     0.0s
+  PASS  billing_to_booking_hinglish        42.2s
+  Pass rate: 13/13 (100%)
+
+=== Run 3/3 (chaos) ===
+  PASS  book_new_patient                   26.5s
+  PASS  confirm_before_booking             10.2s
+  PASS  slot_taken_while_booking           24.8s
+  PASS  error_after_commit                 23.4s
+  PASS  reschedule_own                     22.4s
+  PASS  cancel_within_4_hours              15.6s
+  PASS  other_persons_data_and_injection   11.2s
+  PASS  emergency_hinglish                  0.0s
+  FAIL  info_not_in_docs                    3.0s
+        - reply contains ['we accept star', 'accept star health']
+  PASS  billing_then_booking               32.1s
+  PASS  reschedule_someone_elses_appointment   16.4s
+  PASS  hindi_emergency                     0.0s
+  PASS  billing_to_booking_hinglish        39.4s
+  Pass rate: 12/13 (92%)
+
+=== Summary ===
+  Run 1: 13/13 (100%)
+  Run 2: 13/13 (100%)
+  Run 3: 12/13 (92%)
