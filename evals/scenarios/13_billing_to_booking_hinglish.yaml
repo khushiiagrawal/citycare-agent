@@ -1,0 +1,38 @@
+id: billing_to_booking_hinglish
+description: >
+  Arjun (one paid bill B2, one unpaid bill B3) asks about his bill in Hinglish, gets the link for the unpaid one only,
+  then switches to booking. The booking agent must take over, keep the language and the name he already gave, and
+  book exactly what was confirmed. His existing appointment A1002 stays.
+phone: "9123456780"
+chaos:
+  race_rate: 0
+turns:
+  - "Namaste, main Arjun Mehta bol raha hoon. Mera bill kitna baaki hai?"
+  - "Theek hai, uska payment link bhej do."
+  - "Haan, bhej do."
+  - "Ab Dr. Vikram Rao ke saath Friday 4th December ko shaam 6 baje ka appointment book karo."
+  - "Haan, book kar do."
+checks:
+  - type: response_field
+    turn: 0
+    field: agent
+    equals: billing
+  - type: payment_link_exists
+    bill_id: B3
+  - type: no_payment_link
+    bill_id: B2
+  - type: response_field
+    turn: 3
+    field: agent
+    equals: booking
+  - type: appointment_exists
+    phone: "9123456780"
+    doctor_in: [d2]
+    date: "2026-12-04"
+    time: "18:00"
+  - type: appointment_count
+    phone: "9123456780"
+    equals: 2
+  - type: reply_not_contains
+    turn: 3
+    values: ["your name", "aapka naam", "आपका नाम", "what is your name"]
