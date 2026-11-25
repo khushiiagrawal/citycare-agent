@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-from typing import Any, Awaitable
+from typing import Any, Awaitable, Literal
 
 from pydantic import BaseModel, Field
 
-from agentcore.types import Registry, RunContext
+from agentcore.types import Registry, RunContext, Tool
 
 from .hospital import IST, HospitalClient, InvalidSlot, NotFound, OutcomeUnknown, Unavailable, parse_time
 from .state import flag_handoff, phone_of, record_failure, reset_failures
@@ -185,3 +185,20 @@ def build_tools(hospital: Hospital) -> Registry:
         return await _guard(ctx, client.payment_link(args.bill_id))
 
     return reg
+
+
+class HandoffArgs(BaseModel):
+    reason: Literal["patient_asked_for_person", "patient_upset", "other"] = Field(
+        description="patient_asked_for_person: they want a human. patient_upset: they are clearly upset or angry.")
+
+
+def build_handoff_tool() -> Tool:
+    """Every agent has this one: hand the chat to hospital staff."""
+
+    async def handoff_to_staff(args: HandoffArgs, ctx: RunContext):
+        flag_handoff(ctx, args.reason)
+        return {"ok": True, "next": "Staff will take over. Tell the patient, in their language, that our staff will contact them."}
+
+    return Tool.from_function(
+        handoff_to_staff, HandoffArgs, name="handoff_to_staff",
+        description="Hand this chat to hospital staff. Use it when the patient asks for a person or is clearly upset.")

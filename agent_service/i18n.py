@@ -91,3 +91,38 @@ def readback(kind: str, language: object, **facts: object) -> str:
     """One confirmation question: fixed wording for the language, facts filled in by the caller."""
     language = lang_of(language)
     return f"{READBACK[kind][language].format(**facts)} {FOOTER[language]}"
+
+
+# ------------------------------------------------------------------ replacements and notices
+
+UNVERIFIED = {
+    "en": "I'm not able to confirm that this has been done, so please don't treat it as done. "
+          "Our staff will check it and get back to you.",
+    "hi": "मैं इसकी पुष्टि नहीं कर पा रही हूँ, इसलिए इसे पूरा हुआ न मानें। हमारा स्टाफ़ इसे जाँचकर आपको बताएगा।",
+    "hinglish": "Main iski confirmation nahi de paa rahi hoon, isliye ise ho gaya na maanein. "
+                "Humara staff ise check karke aapko bata dega.",
+}
+
+NO_MEDICAL_ADVICE = {
+    "en": "I'm sorry, I can't give medical advice. A doctor can assess this properly. "
+          "I can help you book an appointment, or connect you with our staff.",
+    "hi": "माफ़ कीजिए, मैं चिकित्सा सलाह नहीं दे सकती। डॉक्टर इसे ठीक से देख सकते हैं। "
+          "मैं आपका अपॉइंटमेंट बुक करने में मदद कर सकती हूँ, या आपको हमारे स्टाफ़ से जोड़ सकती हूँ।",
+    "hinglish": "Maaf kijiye, main medical advice nahi de sakti. Doctor ise sahi se dekh sakte hain. "
+                "Main aapka appointment book karne mein madad kar sakti hoon, ya aapko humare staff se jod sakti hoon.",
+}
+
+HANDOFF = {
+    "en": "Of course. I'm connecting you with our staff, and they will contact you shortly.",
+    "hi": "ज़रूर। मैं आपको हमारे स्टाफ़ से जोड़ रही हूँ, वे जल्द ही आपसे संपर्क करेंगे।",
+    "hinglish": "Zaroor. Main aapko humare staff se jod rahi hoon, woh jaldi hi aapse contact karenge.",
+}
+
+TROUBLE = {  # the agents could not finish: hand over rather than guess
+    "en": "Sorry, I'm having trouble with this right now, so I've asked our staff to help you. Nothing was changed "
+          "unless you were told so earlier.",
+    "hi": "माफ़ कीजिए, अभी मुझे इसमें दिक्कत आ रही है, इसलिए मैंने हमारे स्टाफ़ से आपकी मदद करने को कहा है। "
+          "पहले बताए गए बदलावों के अलावा कुछ नहीं बदला गया है।",
+    "hinglish": "Maaf kijiye, abhi mujhe isme dikkat aa rahi hai, isliye maine humare staff se aapki madad karne ko kaha hai. "
+                "Pehle bataye gaye badlaavon ke alawa kuch nahi badla gaya hai.",
+}
